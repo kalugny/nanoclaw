@@ -278,14 +278,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
       }
+      // Only reset idle timer on actual results, not session-update markers (result: null)
+      resetIdleTimer();
     }
 
     if (result.status === 'error') {
       hadError = true;
     }
-
-    // Agent produced a result — it's now idle, start/reset the idle timer
-    resetIdleTimer();
   });
 
   await setTyping(chatJid, false);
@@ -403,10 +402,12 @@ async function flushOutgoingQueue(): Promise<void> {
   flushing = true;
   try {
     logger.info({ count: outgoingQueue.length }, 'Flushing outgoing message queue');
-    // Drain a copy so new failures can re-queue
-    const pending = outgoingQueue.splice(0);
-    for (const { jid, text } of pending) {
-      await sendMessage(jid, text);
+    // Process one at a time — sendMessage re-queues on failure internally.
+    // Shift instead of splice so unattempted messages stay in the queue
+    // if an unexpected error occurs.
+    while (outgoingQueue.length > 0) {
+      const item = outgoingQueue.shift()!;
+      await sendMessage(item.jid, item.text);
     }
   } finally {
     flushing = false;

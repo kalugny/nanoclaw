@@ -115,9 +115,6 @@ async function runTask(
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
-        // Reset idle timer on each streamed result
-        resetIdleTimer();
-
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (strip <internal> tags)
@@ -125,6 +122,8 @@ async function runTask(
           if (text) {
             await deps.sendMessage(task.chat_jid, `${deps.assistantName}: ${text}`);
           }
+          // Only reset idle timer on actual results, not session-update markers
+          resetIdleTimer();
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
