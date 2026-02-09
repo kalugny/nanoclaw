@@ -56,6 +56,7 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929';
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -374,6 +375,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: MODEL,
       cwd: '/workspace/group',
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -482,6 +484,7 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  log(`Using model: ${MODEL}`);
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);

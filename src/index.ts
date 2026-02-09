@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { exec, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -380,6 +381,29 @@ async function runAgent(
   }
 }
 
+async function sendNtfyNotification(message: string): Promise<void> {
+  const ntfyTopic = process.env.NTFY_TOPIC;
+  const ntfyServer = process.env.NTFY_SERVER || 'https://ntfy.sh';
+
+  if (!ntfyTopic) return;
+
+  try {
+    const preview = message.length > 100 ? message.substring(0, 100) + '...' : message;
+    await fetch(`${ntfyServer}/${ntfyTopic}`, {
+      method: 'POST',
+      body: preview,
+      headers: {
+        'Title': ASSISTANT_NAME,
+        'Priority': 'default',
+        'Tags': 'speech_balloon',
+      },
+    });
+    logger.debug({ ntfyTopic }, 'NTFY notification sent');
+  } catch (err) {
+    logger.debug({ err }, 'NTFY notification failed');
+  }
+}
+
 async function sendMessage(jid: string, text: string): Promise<void> {
   if (!waConnected) {
     outgoingQueue.push({ jid, text });
@@ -389,6 +413,7 @@ async function sendMessage(jid: string, text: string): Promise<void> {
   try {
     await sock.sendMessage(jid, { text });
     logger.info({ jid, length: text.length }, 'Message sent');
+    await sendNtfyNotification(text);
   } catch (err) {
     // If send fails, queue it for retry on reconnect
     outgoingQueue.push({ jid, text });
@@ -1054,6 +1079,14 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+
+  const ntfyTopic = process.env.NTFY_TOPIC;
+  if (ntfyTopic) {
+    logger.info({ topic: ntfyTopic }, 'NTFY notifications enabled');
+  } else {
+    logger.info('NTFY notifications disabled (NTFY_TOPIC not set)');
+  }
+
   loadState();
 
   // Graceful shutdown handlers
