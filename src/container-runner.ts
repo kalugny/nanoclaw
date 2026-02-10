@@ -192,6 +192,17 @@ function buildVolumeMounts(
     readonly: true,
   });
 
+  // SSH keys for git operations (read-only, bypasses additionalMounts security)
+  // Mounts ~/.ssh to /workspace/ssh-keys; entrypoint copies to /home/node/.ssh with correct perms
+  const sshDir = path.join(homeDir, '.ssh');
+  if (fs.existsSync(sshDir)) {
+    mounts.push({
+      hostPath: sshDir,
+      containerPath: '/workspace/ssh-keys',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(

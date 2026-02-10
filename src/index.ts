@@ -421,6 +421,19 @@ async function sendMessage(jid: string, text: string): Promise<void> {
   }
 }
 
+async function sendImage(jid: string, imagePath: string, caption?: string): Promise<void> {
+  try {
+    const imageBuffer = fs.readFileSync(imagePath);
+    const msg: { image: Buffer; caption?: string } = { image: imageBuffer };
+    if (caption) msg.caption = caption;
+    await sock.sendMessage(jid, msg);
+    logger.info({ jid, imagePath, caption: caption?.slice(0, 50) }, 'Image sent');
+  } catch (err) {
+    logger.error({ jid, imagePath, err }, 'Failed to send image');
+    throw err;
+  }
+}
+
 let flushing = false;
 async function flushOutgoingQueue(): Promise<void> {
   if (flushing || outgoingQueue.length === 0) return;
@@ -497,6 +510,48 @@ function startIpcWatcher(): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (data.type === 'send_image' && data.chatJid && data.imagePath) {
+                // Authorization: verify this group can send to this chatJid
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  // Resolve image path relative to the group's IPC directory
+                  const resolvedPath = path.resolve(
+                    path.join(ipcBaseDir, sourceGroup),
+                    data.imagePath,
+                  );
+                  // Security: ensure resolved path is within the IPC directory
+                  const ipcGroupDir = path.resolve(path.join(ipcBaseDir, sourceGroup));
+                  if (!resolvedPath.startsWith(ipcGroupDir)) {
+                    logger.warn(
+                      { imagePath: data.imagePath, resolved: resolvedPath, sourceGroup },
+                      'Image path traversal attempt blocked',
+                    );
+                  } else if (!fs.existsSync(resolvedPath)) {
+                    logger.warn(
+                      { imagePath: resolvedPath, sourceGroup },
+                      'IPC image file not found',
+                    );
+                  } else {
+                    try {
+                      await sendImage(data.chatJid, resolvedPath, data.caption);
+                      logger.info(
+                        { chatJid: data.chatJid, sourceGroup, imagePath: resolvedPath },
+                        'IPC image sent',
+                      );
+                    } finally {
+                      // Clean up the image file after sending
+                      try { fs.unlinkSync(resolvedPath); } catch { /* ignore */ }
+                    }
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC send_image attempt blocked',
                   );
                 }
               }
@@ -918,6 +973,18 @@ async function startMessageLoop(): Promise<void> {
   messageLoopRunning = true;
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+
+  // Send startup notification to main channel
+  try {
+    const mainGroup = Object.entries(registeredGroups).find(([_, g]) => g.folder === MAIN_GROUP_FOLDER);
+    if (mainGroup) {
+      const [mainJid] = mainGroup;
+      await sendMessage(mainJid, `${ASSISTANT_NAME} is online and ready`);
+      logger.info({ jid: mainJid }, 'Sent startup notification');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to send startup notification');
+  }
 
   while (true) {
     try {
